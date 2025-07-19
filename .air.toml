@@ -1,0 +1,13 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/main.exe ."
+  bin = "tmp/main.exe"
+  include_ext = ["go"]
+  exclude_dir = ["vendor"]
+  exclude_file = []
+  follow_symlink = true
+  delay = 1000
+  log = "air.log"
+  send_interrupt = true
