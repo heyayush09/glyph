@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -23,7 +24,7 @@ func (e *Engine) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		currentCfg := e.Config.Load()
 
-		var targetURL string
+		// Get the route for this host
 		host := r.Host
 		route, ok := currentCfg.Routes[host]
 		if !ok {
@@ -31,42 +32,170 @@ func (e *Engine) Handler() http.Handler {
 			return
 		}
 
-		switch {
-		case route.To != "":
-			targetURL = route.To
-		case route.Target.Type == "ip":
-			targetURL = "http://" + route.Target.IP
-		default:
-			http.Error(w, "Invalid route config", http.StatusBadGateway)
+		// Determine target URL based on route configuration
+		targetURL, err := e.resolveTargetURL(route)
+		if err != nil {
+			log.Printf("[proxy] failed to resolve target URL for host %s: %v", host, err)
+			http.Error(w, "Invalid route configuration", http.StatusBadGateway)
 			return
 		}
 
+		// Parse target URL
 		u, err := url.Parse(targetURL)
 		if err != nil {
+			log.Printf("[proxy] invalid target URL %s: %v", targetURL, err)
 			http.Error(w, "Bad target URL", http.StatusBadGateway)
 			return
 		}
 
+		// Create reverse proxy
 		proxy := httputil.NewSingleHostReverseProxy(u)
 
-		// Inject X-User-* headers if session present
-		proxy.ModifyResponse = func(resp *http.Response) error {
-			return nil
-		}
-		r.Header.Del("X-User-Email")
-		r.Header.Del("X-User-Name")
+		// Configure proxy behavior
+		e.configureProxy(proxy, route)
 
-		if claims, ok := r.Context().Value(session.ClaimsKey()).(*session.UserClaims); ok {
-			r.Header.Set("X-User-Email", claims.Email)
-			r.Header.Set("X-User-Name", claims.Name)
-		}
+		// Modify request before proxying
+		e.modifyRequest(r)
 
-		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("[proxy] error: %v", err)
-			http.Error(w, "Proxy error", http.StatusBadGateway)
-		}
-
-		// Proxy request
+		// Proxy the request
 		proxy.ServeHTTP(w, r)
 	})
+}
+
+func (e *Engine) resolveTargetURL(route config.Route) (string, error) {
+	// If 'to' field is specified, use it directly
+	if route.To != "" {
+		return route.To, nil
+	}
+
+	// Otherwise, construct URL from target configuration
+	switch route.Target.Type {
+	case "ip":
+		if route.Target.IP == "" {
+			return "", fmt.Errorf("IP is required when target type is 'ip'")
+		}
+		scheme := "http"
+		if route.Target.Port == 443 {
+			scheme = "https"
+		}
+		if route.Target.Port != 0 && route.Target.Port != 80 && route.Target.Port != 443 {
+			return fmt.Sprintf("%s://%s:%d", scheme, route.Target.IP, route.Target.Port), nil
+		}
+		return fmt.Sprintf("%s://%s", scheme, route.Target.IP), nil
+
+	case "url":
+		if route.Target.URL == "" {
+			return "", fmt.Errorf("URL is required when target type is 'url'")
+		}
+		return route.Target.URL, nil
+
+	case "service":
+		// For service discovery or other service types
+		// This could be extended to support service discovery mechanisms
+		return "", fmt.Errorf("service type not yet implemented")
+
+	default:
+		return "", fmt.Errorf("unsupported target type: %s", route.Target.Type)
+	}
+}
+
+func (e *Engine) configureProxy(proxy *httputil.ReverseProxy, route config.Route) {
+	// Set up error handler
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		log.Printf("[proxy] error proxying request to %s: %v", r.URL.String(), err)
+		http.Error(w, "Proxy error", http.StatusBadGateway)
+	}
+
+	// Configure request director for path manipulation
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		
+		// Handle path stripping if configured
+		if route.StripPath {
+			e.stripPath(req)
+		}
+	}
+
+	// Configure response modification if needed
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		// Add any response modifications here if needed
+		return nil
+	}
+}
+
+func (e *Engine) modifyRequest(r *http.Request) {
+	// Clear any existing user headers to prevent header injection
+	r.Header.Del("X-User-Email")
+	r.Header.Del("X-User-Name")
+	r.Header.Del("X-User-Groups")
+
+	// Extract session claims and inject user information headers
+	if claims, err := session.GetSession(r); err == nil {
+		if email, ok := claims["email"]; ok && email != "" {
+			r.Header.Set("X-User-Email", email)
+		}
+		if name, ok := claims["name"]; ok && name != "" {
+			r.Header.Set("X-User-Name", name)
+		}
+		if groups, ok := claims["groups"]; ok && groups != "" {
+			r.Header.Set("X-User-Groups", groups)
+		}
+	}
+
+	// Set additional proxy headers
+	r.Header.Set("X-Forwarded-Proto", e.getScheme(r))
+	r.Header.Set("X-Forwarded-Host", r.Host)
+	
+	// Preserve original IP if not already set
+	if r.Header.Get("X-Forwarded-For") == "" {
+		if clientIP := e.getClientIP(r); clientIP != "" {
+			r.Header.Set("X-Forwarded-For", clientIP)
+		}
+	}
+}
+
+func (e *Engine) stripPath(r *http.Request) {
+	// Remove the first path segment
+	// For example: /app/api/users -> /api/users
+	path := r.URL.Path
+	if path != "/" {
+		segments := strings.Split(path, "/")
+		if len(segments) > 2 {
+			r.URL.Path = "/" + strings.Join(segments[2:], "/")
+		} else {
+			r.URL.Path = "/"
+		}
+	}
+}
+
+func (e *Engine) getScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	if scheme := r.Header.Get("X-Forwarded-Proto"); scheme != "" {
+		return scheme
+	}
+	return "http"
+}
+
+func (e *Engine) getClientIP(r *http.Request) string {
+	// Check for IP in various headers (in order of preference)
+	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		return ip
+	}
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return ip
+	}
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		// X-Forwarded-For can contain multiple IPs, get the first one
+		if ips := strings.Split(forwarded, ","); len(ips) > 0 {
+			return strings.TrimSpace(ips[0])
+		}
+	}
+	// Fall back to RemoteAddr (format: "IP:port")
+	if ip := strings.Split(r.RemoteAddr, ":"); len(ip) > 0 {
+		return ip[0]
+	}
+	return ""
 }

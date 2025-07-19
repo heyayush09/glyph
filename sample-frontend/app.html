@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Glyph Proxy Test App</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            max-width: 800px;
+            width: 90%;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 2rem;
+            font-size: 2.5rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .status {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+        }
+
+        .user-info {
+            background: rgba(0, 255, 0, 0.2);
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+        }
+
+        .header-info {
+            background: rgba(255, 255, 0, 0.2);
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .feature-card {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 1.5rem;
+            border-radius: 15px;
+            text-align: center;
+            transition: transform 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .feature-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .api-test {
+            margin-top: 2rem;
+            text-align: center;
+        }
+
+        button {
+            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 0.5rem;
+        }
+
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+
+        .response {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .timestamp {
+            opacity: 0.8;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Glyph Proxy Test Application</h1>
+        
+        <div class="status">
+            <h3>✅ Application Status: Running</h3>
+            <p class="timestamp">Started: <span id="startTime"></span></p>
+            <p>Port: 3000 | Protected by: Glyph Proxy</p>
+        </div>
+
+        <div class="user-info">
+            <h3>👤 User Information</h3>
+            <div id="userHeaders">
+                <p>Email: <span id="userEmail">Loading...</span></p>
+                <p>Name: <span id="userName">Loading...</span></p>
+                <p>Groups: <span id="userGroups">Loading...</span></p>
+            </div>
+        </div>
+
+        <div class="header-info">
+            <h3>🔍 Request Headers</h3>
+            <div id="headers">Loading headers...</div>
+        </div>
+
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🔐</div>
+                <h4>OIDC Protected</h4>
+                <p>Secured with Google OAuth2</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">🌐</div>
+                <h4>Reverse Proxy</h4>
+                <p>Accessed via app.localhost</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h4>Live Reload</h4>
+                <p>Configuration updates automatically</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h4>Header Injection</h4>
+                <p>User info passed to backend</p>
+            </div>
+        </div>
+
+        <div class="api-test">
+            <h3>🧪 API Test</h3>
+            <p>Test the API endpoint at api.localhost (with path stripping)</p>
+            <button onclick="testAPI()">Test API Endpoint</button>
+            <button onclick="refreshData()">Refresh Data</button>
+            <div id="apiResponse" class="response" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        // Set start time
+        document.getElementById('startTime').textContent = new Date().toLocaleString();
+
+        // Function to load header information
+        async function loadHeaders() {
+            try {
+                const response = await fetch('/api/headers');
+                const data = await response.json();
+                
+                // Update user info
+                document.getElementById('userEmail').textContent = data.userEmail || 'Not provided';
+                document.getElementById('userName').textContent = data.userName || 'Not provided';
+                document.getElementById('userGroups').textContent = data.userGroups || 'Not provided';
+                
+                // Update headers display
+                let headersHtml = '';
+                for (const [key, value] of Object.entries(data.headers)) {
+                    if (key.toLowerCase().startsWith('x-user-') || 
+                        key.toLowerCase().startsWith('x-forwarded-')) {
+                        headersHtml += `<strong>${key}:</strong> ${value}<br>`;
+                    }
+                }
+                document.getElementById('headers').innerHTML = headersHtml || 'No special headers found';
+                
+            } catch (error) {
+                console.error('Error loading headers:', error);
+                document.getElementById('headers').innerHTML = 'Error loading headers';
+            }
+        }
+
+        // Function to test API
+        async function testAPI() {
+            const responseDiv = document.getElementById('apiResponse');
+            responseDiv.style.display = 'block';
+            responseDiv.textContent = 'Testing API...';
+            
+            try {
+                // Test the API endpoint (should go through api.localhost with path stripping)
+                const response = await fetch('https://api.localhost/test', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.text();
+                responseDiv.textContent = `API Response (${response.status}):\n${data}`;
+            } catch (error) {
+                responseDiv.textContent = `API Error: ${error.message}`;
+            }
+        }
+
+        // Function to refresh data
+        function refreshData() {
+            loadHeaders();
+            location.reload();
+        }
+
+        // Load headers on page load
+        loadHeaders();
+
+        // Auto-refresh every 30 seconds
+        setInterval(loadHeaders, 30000);
+    </script>
+
+    <!-- Simple API endpoint simulation -->
+    <script>
+        // Create a simple API endpoint for header inspection
+        if (window.location.pathname === '/api/headers') {
+            // This would normally be handled by your backend
+            // For demo purposes, we'll simulate it
+        }
+    </script>
+</body>
+</html>

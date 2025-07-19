@@ -1,0 +1,30 @@
+# Ignore all .env files
+.env*
+*.env
+
+# Ignore all config.yaml files
+config.yaml
+**/config.yaml
+
+# Go build artifacts and binaries
+*.exe
+*.out
+*.test
+main
+main.exe
+
+# Temporary and build folders
+/tmp/
+tmp/
+
+
+# Editor and system files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local override files
+wwwconfig.yaml

@@ -45,11 +45,12 @@ func WatchConfigFile(file string, ac *AtomicConfig) {
 					debounce = time.After(500 * time.Millisecond)
 				}
 			case <-debounce:
-				newConfig, err := LoadConfig(file)
+				newAtomicConfig, err := LoadConfig(file)
 				if err != nil {
 					log.Printf("[config] Failed to reload: %v", err)
 					continue
 				}
+				newConfig := newAtomicConfig.Load()
 				ac.Store(newConfig)
 				log.Println("[config] Reloaded config.yaml")
 			case err, ok := <-watcher.Errors:
