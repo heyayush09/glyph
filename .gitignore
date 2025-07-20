@@ -16,6 +16,7 @@ main.exe
 # Temporary and build folders
 /tmp/
 tmp/
+tmp/main.exe
 
 
 # Editor and system files

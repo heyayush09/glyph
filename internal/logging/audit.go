@@ -1,4 +1,3 @@
-// internal/logging/audit.go
 package logging
 
 import (

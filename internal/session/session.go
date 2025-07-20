@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/heyayush09/glyph-proxy/internal/logging"
 )
 
 const (
@@ -46,69 +48,99 @@ func InitSessionStore() error {
 	return nil
 }
 
-func SetSession(w http.ResponseWriter, claims map[string]string) error {
+func SetSession(w http.ResponseWriter, claims map[string]string, secure bool) error {
 	data := ""
 	for k, v := range claims {
 		data += k + "=" + v + ";"
 	}
 	encrypted, err := encrypt([]byte(data))
 	if err != nil {
+		logging.Log.Errorf("Failed to encrypt session data: %v", err)
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{
+
+	cookie := &http.Cookie{
 		Name:     cookieName,
 		Value:    base64.StdEncoding.EncodeToString(encrypted),
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(cookieDuration.Seconds()),
-	})
+	}
+
+	http.SetCookie(w, cookie)
+	logging.Log.Debugf("Setting session cookie: %s with Secure=%t", cookie.Name, secure)
 	return nil
 }
 
-func SetRefreshToken(w http.ResponseWriter, token string) error {
+func SetRefreshToken(w http.ResponseWriter, token string, secure bool) error {
 	encrypted, err := encrypt([]byte(token))
 	if err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{
+	cookie := &http.Cookie{
 		Name:     refreshName,
 		Value:    base64.StdEncoding.EncodeToString(encrypted),
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(refreshDuration.Seconds()),
-	})
+	}
+
+	http.SetCookie(w, cookie)
+	logging.Log.Debugf("Setting refresh token cookie with Secure=%t", secure)
 	return nil
 }
 
-func GetSession(r *http.Request) (map[string]string, error) {
+func GetSession(r *http.Request) (*UserClaims, error) {
+	logging.Log.Debugf("Attempting to get session cookie '%s'", cookieName)
 	cookie, err := r.Cookie(cookieName)
 	if err != nil {
+		logging.Log.Debugf("Session cookie not found: %v", err)
 		return nil, err
 	}
+
+	logging.Log.Debug("Session cookie found, attempting to decrypt")
 	cipherText, err := base64.StdEncoding.DecodeString(cookie.Value)
 	if err != nil {
+		logging.Log.Warnf("Failed to base64 decode session cookie: %v", err)
 		return nil, err
 	}
+
 	plain, err := decrypt(cipherText)
 	if err != nil {
+		logging.Log.Warnf("Failed to decrypt session cookie: %v", err)
 		return nil, err
 	}
+
+	// Parse the key-value pairs from the decrypted string
 	pairs := strings.Split(string(plain), ";")
-	claims := make(map[string]string)
+	claimsMap := make(map[string]string)
 	for _, pair := range pairs {
 		if pair == "" {
 			continue
 		}
 		parts := strings.SplitN(pair, "=", 2)
 		if len(parts) == 2 {
-			claims[parts[0]] = parts[1]
+			claimsMap[parts[0]] = parts[1]
 		}
 	}
-	return claims, nil
+
+	// Convert map to UserClaims struct
+	userClaims := &UserClaims{
+		Email:  claimsMap["email"],
+		Name:   claimsMap["name"],
+		Groups: strings.Split(claimsMap["groups"], ","),
+	}
+
+	if userClaims.Email == "" {
+		return nil, errors.New("email claim is missing from session")
+	}
+
+	logging.Log.Debugf("Successfully decrypted session claims for user: %s", userClaims.Email)
+	return userClaims, nil
 }
 
 func GetRefreshToken(r *http.Request) (string, error) {
@@ -154,9 +186,14 @@ const claimsKey contextKey = "claims"
 
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		claims, err := GetSession(r)
-		if err == nil {
-			r = r.WithContext(context.WithValue(r.Context(), claimsKey, claims))
+		logging.Log.Debugf("Session middleware processing request for %s", r.URL.Path)
+		userClaims, err := GetSession(r)
+		if err == nil && userClaims != nil {
+			logging.Log.Debugf("Session claims found for user %s, adding to request context", userClaims.Email)
+			ctx := context.WithValue(r.Context(), claimsKey, userClaims)
+			r = r.WithContext(ctx)
+		} else {
+			logging.Log.Debug("No valid session found for request")
 		}
 		next.ServeHTTP(w, r)
 	})

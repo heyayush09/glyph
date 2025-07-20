@@ -2,13 +2,13 @@ package proxy
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
 
 	"github.com/heyayush09/glyph-proxy/internal/config"
+	"github.com/heyayush09/glyph-proxy/internal/logging"
 	"github.com/heyayush09/glyph-proxy/internal/session"
 )
 
@@ -26,24 +26,28 @@ func (e *Engine) Handler() http.Handler {
 
 		// Get the route for this host
 		host := r.Host
+		logging.Log.Debugf("Proxy engine received request for host: %s", host)
 		route, ok := currentCfg.Routes[host]
 		if !ok {
+			logging.Log.Warnf("Route not found for host: %s", host)
 			http.Error(w, "Route not found", http.StatusNotFound)
 			return
 		}
+		logging.Log.Debugf("Found matching route for host %s: %+v", host, route)
 
 		// Determine target URL based on route configuration
 		targetURL, err := e.resolveTargetURL(route)
 		if err != nil {
-			log.Printf("[proxy] failed to resolve target URL for host %s: %v", host, err)
+			logging.Log.Errorf("[proxy] failed to resolve target URL for host %s: %v", host, err)
 			http.Error(w, "Invalid route configuration", http.StatusBadGateway)
 			return
 		}
+		logging.Log.Debugf("Resolved target URL: %s", targetURL)
 
 		// Parse target URL
 		u, err := url.Parse(targetURL)
 		if err != nil {
-			log.Printf("[proxy] invalid target URL %s: %v", targetURL, err)
+			logging.Log.Errorf("[proxy] invalid target URL %s: %v", targetURL, err)
 			http.Error(w, "Bad target URL", http.StatusBadGateway)
 			return
 		}
@@ -102,7 +106,7 @@ func (e *Engine) resolveTargetURL(route config.Route) (string, error) {
 func (e *Engine) configureProxy(proxy *httputil.ReverseProxy, route config.Route) {
 	// Set up error handler
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		log.Printf("[proxy] error proxying request to %s: %v", r.URL.String(), err)
+		logging.Log.Errorf("[proxy] error proxying request to %s: %v", r.URL.String(), err)
 		http.Error(w, "Proxy error", http.StatusBadGateway)
 	}
 
@@ -131,16 +135,19 @@ func (e *Engine) modifyRequest(r *http.Request) {
 	r.Header.Del("X-User-Groups")
 
 	// Extract session claims and inject user information headers
-	if claims, err := session.GetSession(r); err == nil {
-		if email, ok := claims["email"]; ok && email != "" {
-			r.Header.Set("X-User-Email", email)
+	if claims, err := session.GetSession(r); err == nil && claims != nil {
+		logging.Log.Debugf("Injecting user claims into headers for user: %s", claims.Email)
+		if claims.Email != "" {
+			r.Header.Set("X-User-Email", claims.Email)
 		}
-		if name, ok := claims["name"]; ok && name != "" {
-			r.Header.Set("X-User-Name", name)
+		if claims.Name != "" {
+			r.Header.Set("X-User-Name", claims.Name)
 		}
-		if groups, ok := claims["groups"]; ok && groups != "" {
-			r.Header.Set("X-User-Groups", groups)
+		if len(claims.Groups) > 0 {
+			r.Header.Set("X-User-Groups", strings.Join(claims.Groups, ","))
 		}
+	} else {
+		logging.Log.Debug("No session claims found to inject into headers")
 	}
 
 	// Set additional proxy headers

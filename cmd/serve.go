@@ -3,8 +3,6 @@ package cmd
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +11,7 @@ import (
 
 	"github.com/heyayush09/glyph-proxy/internal/auth"
 	"github.com/heyayush09/glyph-proxy/internal/config"
+	"github.com/heyayush09/glyph-proxy/internal/logging"
 	"github.com/heyayush09/glyph-proxy/internal/middleware"
 	"github.com/heyayush09/glyph-proxy/internal/policy"
 	"github.com/heyayush09/glyph-proxy/internal/proxy"
@@ -37,27 +36,30 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) {
-	fmt.Println("🚀 Starting glyph-proxy server...")
+	logging.Log.Info("🚀 Starting glyph-proxy server...")
 
 	// Load configuration
 	atomicCfg, err := config.LoadConfig(configFile)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		logging.Log.Fatalf("Failed to load config: %v", err)
 	}
+	logging.Log.Info("Configuration loaded successfully")
 
 	cfg := atomicCfg.Load()
 
 	// Initialize session store
 	if err := session.InitSessionStore(); err != nil {
-		log.Fatalf("Failed to initialize session store: %v", err)
+		logging.Log.Fatalf("Failed to initialize session store: %v", err)
 	}
+	logging.Log.Info("Session store initialized")
 
 	// Initialize OIDC manager
 	ctx := context.Background()
 	oidcManager, err := auth.NewOIDCManager(ctx, &cfg.OIDC)
 	if err != nil {
-		log.Fatalf("Failed to initialize OIDC: %v", err)
+		logging.Log.Fatalf("Failed to initialize OIDC: %v", err)
 	}
+	logging.Log.Info("OIDC manager initialized")
 
 	// Initialize proxy engine
 	proxyEngine := proxy.New(atomicCfg)
@@ -103,22 +105,22 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	// Start server
 	go func() {
-		fmt.Printf("🌐 Server listening on %s\n", cfg.Listen)
-		
+		logging.Log.Infof("🌐 Server listening on %s", cfg.Listen)
+
 		if cfg.TLS.Mode == "auto" || cfg.TLS.Mode == "manual" {
 			if cfg.TLS.Mode == "auto" {
-				fmt.Println("🔒 TLS: Auto mode (development certificates)")
+				logging.Log.Info("🔒 TLS: Auto mode (development certificates)")
 			} else {
-				fmt.Printf("🔒 TLS: Manual mode (cert: %s, key: %s)\n", cfg.TLS.CertFile, cfg.TLS.KeyFile)
+				logging.Log.Infof("🔒 TLS: Manual mode (cert: %s, key: %s)", cfg.TLS.CertFile, cfg.TLS.KeyFile)
 			}
-			
+
 			if err := server.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("HTTPS server failed: %v", err)
+				logging.Log.Fatalf("HTTPS server failed: %v", err)
 			}
 		} else {
-			fmt.Println("⚠️  TLS: Disabled (not recommended for production)")
+			logging.Log.Warn("⚠️  TLS: Disabled (not recommended for production)")
 			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("HTTP server failed: %v", err)
+				logging.Log.Fatalf("HTTP server failed: %v", err)
 			}
 		}
 	}()
@@ -128,17 +130,17 @@ func runServe(cmd *cobra.Command, args []string) {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	fmt.Println("\n🛑 Shutting down server...")
+	logging.Log.Info("\n🛑 Shutting down server...")
 
 	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		logging.Log.Errorf("Server forced to shutdown: %v", err)
 	}
 
-	fmt.Println("✅ Server exited")
+	logging.Log.Info("✅ Server exited")
 }
 
 // createPolicyEnforcer wraps the proxy handler with policy enforcement
