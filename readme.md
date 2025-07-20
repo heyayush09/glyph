@@ -1,6 +1,6 @@
-# glyph-proxy
+# glyph
 
-**glyph-proxy** is a high-performance, identity-aware reverse proxy built in Go.  
+**glyph** is a high-performance, identity-aware reverse proxy built in Go.  
 It enables secure Single Sign-On (SSO) using **OIDC** and enforces fine-grained access control policies for internal web applications.  
 Designed for local development and production use in cloud-native environments.
 
