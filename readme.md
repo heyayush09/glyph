@@ -30,7 +30,6 @@ Designed for local development and production use in cloud-native environments.
 | HTTP Routing     | [Chi](https://github.com/go-chi/chi)            |
 | OIDC             | [go-oidc](https://github.com/coreos/go-oidc)    |
 | JWT              | [golang-jwt](https://github.com/golang-jwt/jwt) |
-| AWS Integration  | [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2) |
 | Hot Reload       | [Air](https://github.com/cosmtrek/air)          |
 
 ---
